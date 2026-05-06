@@ -1,0 +1,27 @@
+services:
+  dicom-patient-matcher:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./test-data/roster:/roster:ro
+    environment:
+      ASSIGNMENT_ROSTER_PATH: /roster
+
+  dicom-patient-matcher-dev:
+    image: gradle:8-jdk21
+    working_dir: /app
+    command: bash -lc "chmod +x gradlew && ./gradlew quarkusDev -Dquarkus.http.host=0.0.0.0 --no-daemon"
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+      - gradle-cache:/home/gradle/.gradle
+      - ./test-data/roster:/roster:ro
+    environment:
+      ASSIGNMENT_ROSTER_PATH: /roster
+    profiles:
+      - dev
+
+volumes:
+  gradle-cache:

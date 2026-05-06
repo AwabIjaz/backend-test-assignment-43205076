@@ -1,0 +1,10 @@
+.gradle/
+build/
+.quarkus/
+*.class
+.venv/
+tools/
+.vscode/
+uv.lock
+pyproject.toml
+REVIEWER*
