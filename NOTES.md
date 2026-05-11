@@ -142,3 +142,32 @@ The current flat array response shape is forward-compatible with adding a pagina
 
 `@Tag`, `@Operation`, and `@APIResponse` are included because `quarkus-smallrye-openapi` is on the classpath and Swagger UI is always enabled via `application.properties`.
 They have no effect on request handling but populate the Swagger UI at `/q/swagger-ui`, making the endpoint explorable without reading source code.
+
+---
+
+## Tests
+
+### Two-layer test strategy
+
+**Integration tests (`PatientSearchResourceTest`, `@QuarkusTest`)** start a real Quarkus container and exercise the full stack. 
+HTTP routing, CDI injection, `RosterLoader` loading real DICOM files from disk, `PatientSearchService` filtering, and JSON serialisation.
+
+**Unit tests (`PatientSearchServiceTest`, plain JUnit 5)** do not start Quarkus at all.
+`RosterLoader` is replaced by a handwritten stub (`StubRosterLoader extends RosterLoader`) that overrides `getAll()` to return a fixed fixture.
+The stub bypasses `@PostConstruct` and DICOM I/O entirely. This keeps the tests fast and isolates the search predicate logic from the filesystem.
+
+### No Mockito
+
+Mockito is not on the classpath. The handwritten stub approach is used instead.
+A subclass override of `getAll()` is simpler than adding a mocking dependency for a single method.
+In a larger codebase with Mockito available, `@Mock RosterLoader` with a `when(rosterLoader.getAll()).thenReturn(fixture)` stub would be the conventional approach.
+
+### Key test cases and what they verify
+
+- **patientId exact match**: `P1001` returns multiple files (same patient, multiple scans); a prefix like `P100` returns nothing.
+- **lastName substring**: `"ller"` matches all Müller/MÜLLER/Muller variants.
+- **no unicode normalization**: `"muller"` matches only `P2001/Muller`, not `P1001/Müller`, confirming `ü is not equal to u`.
+- **AND logic**: `patientId=P1001&lastName=muller` returns nothing; P1001 has Müller, not Muller.
+- **empty result**: returns `200` with `[]`, not `404`.
+- **no params**: returns `400`.
+- **both params null**: service returns the full roster; this path is unreachable via HTTP since the resource returns 400 first, but tested directly to prove the service itself imposes no constraint.
