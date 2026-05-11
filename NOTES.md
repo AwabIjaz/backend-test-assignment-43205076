@@ -88,3 +88,57 @@ Constructor injection (with a `private final` field) would be the stricter choic
 In a production codebase, constructor injection would be preferred.
 
 The `rosterLoader` field is package-private (no `private` modifier) specifically to allow unit tests in the same package to inject a stub directly without running a CDI container.
+
+---
+
+## PatientSearchResource
+
+### HTTP method: GET
+
+Search is a read operation with no side effects. Query parameters are short enough for a URL.
+GET is the correct choice, it is idiomatic REST and allows the endpoint to be called directly from a browser or curl without a request body.
+
+### No-results response: 200 with empty array
+
+When a search matches nothing, the endpoint returns `200 OK` with `[]`.
+HTTP 404 means "this resource does not exist", but the search endpoint always exists; it just has zero results.
+An empty collection is a valid and meaningful response.
+
+### Missing parameters: 400 Bad Request
+
+If neither `patientId` nor `lastName` is provided, the endpoint returns `400 Bad Request`.
+An unconstrained search returning the full roster is bad API design regardless of dataset size, it gives no signal to the caller that they forgot to pass a parameter.
+The 400 makes the contract explicit.
+
+### Blank string handling
+
+Query parameters containing only whitespace are treated as missing, `"   "` is equivalent to not providing the parameter.
+The value is trimmed before passing to the service so the search predicate never sees whitespace-only strings.
+
+### Error response body
+
+The 400 response returns a JSON object `{"error": "..."}` rather than plain text, consistent with the 200 response being JSON.
+In production this would use a typed `ErrorResponse` record shared across all endpoints.
+
+### `Optional<String>` query parameters
+
+Each query parameter is typed as `Optional<String>` rather than a plain nullable `String`.
+This makes the absent-vs-present distinction explicit in the method signature and avoids ambiguity between a missing parameter and an empty string value.
+
+### `@RestQuery` over `@QueryParam`
+
+`@RestQuery` is the RESTEasy Reactive annotation and is idiomatic for `quarkus-rest-jackson`.
+It infers the query parameter name from the Java variable name (enabled by the `-parameters` compiler flag already set in `build.gradle`).
+This avoids the need to repeat the name as a string literal, `@RestQuery String patientId` instead of `@QueryParam("patientId") String patientId`, reducing the risk of typos and keeping refactoring safe.
+
+### Pagination
+
+Search results are returned as a flat array without pagination. For the assignment's dataset this is appropriate.
+In a production system returning potentially thousands of matching studies, pagination would be essential.
+A `page` and `pageSize` parameter with a response envelope containing `totalResults`, `totalPages`, and `data` would be the natural extension.
+The current flat array response shape is forward-compatible with adding a pagination envelope later without breaking the core search contract.
+
+### OpenAPI annotations
+
+`@Tag`, `@Operation`, and `@APIResponse` are included because `quarkus-smallrye-openapi` is on the classpath and Swagger UI is always enabled via `application.properties`.
+They have no effect on request handling but populate the Swagger UI at `/q/swagger-ui`, making the endpoint explorable without reading source code.
