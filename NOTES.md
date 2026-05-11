@@ -51,3 +51,40 @@ In a medical system, one corrupt file should not make the entire roster unavaila
 Files where both PatientID and last name are blank are loaded but logged as a warning.
 They will not match any search but are retained rather than discarded.
 Dropping data in a medical context without explicit instructions felt like the wrong default.
+
+---
+
+## PatientSearchService
+
+### Search semantics
+
+- **PatientID: exact match.** IDs are opaque identifiers. A substring match on `"117"` returning `"1174"` would be misleading and likely wrong clinically. Exact equality is the only safe behaviour for an ID field.
+- **lastName: case-insensitive substring match.** A clinician searching for a patient should not need to know the exact spelling or capitalisation. Typing a partial fragment (e.g. `"schä"` surfaces `"Schäfer"`) should surface all matching last names. This is implemented with `String.contains()` after lowercasing both sides.
+- **One provided: one is null.** A null parameter means the caller did not provide that criterion, the filter passes all records for that field. This keeps the search method as a single entry point for all three search modes rather than three separate methods.
+- **Both provided: AND logic.** A record must satisfy both predicates independently. Chaining two independent `.filter()` calls on the stream expresses this naturally.
+- **Neither provided: not handled here.** The service returns the full roster if both arguments are `null`. Rejecting that case will be the HTTP layer's responsibility, the service stays free of HTTP concerns and is independently testable with any combination of inputs including null/null.
+
+### `Locale.ROOT` for case folding
+
+`toLowerCase()` without a locale argument uses the JVM's system locale, which is non-deterministic, the same query could behave differently on a German or Turkish server.
+Example: in Turkish locale, `"EMILIA".toLowerCase()` gives `"emılıa"` rather than `"emilia"` — the uppercase `I` becomes dotless `ı`, so a search for `"emilia"` would not match `"EMILIA"` on a Turkish-locale server.
+
+### Known limitation: `Weiß` vs `WEISS` in name search
+
+The test data contains `P1004` stored as `Weiß` in one file and `WEISS` in another.
+This reflects a real-world DICOM data quality problem: older scanners and hospital systems that could not encode `ß` substituted `SS` when writing the tag, or normalised names to all-caps.
+As a result, searching `lastName=weiß` finds only the `Weiß` file, and `lastName=weiss` finds only `WEISS`, the two are not linked by name alone.
+
+Implementing `ß to ss` unicode normalization would fix this case but would break another: `P1001` (`Müller`) and `P2001` (`Muller`) are genuinely different patients.
+Normalizing `ü to u` would silently conflate them, which is a more dangerous error in a medical context than missing a match.
+
+The correct approach for retrieving all records of a patient is to search by `patientId`, not by name.
+`patientId=P1004` correctly returns both the `Weiß` and `WEISS` files regardless of name encoding.
+
+### Field injection over constructor injection
+
+`@Inject` field injection is used for simplicity and is idiomatic in Quarkus quickstarts.
+Constructor injection (with a `private final` field) would be the stricter choice, it makes dependencies explicit and keeps fields immutable.
+In a production codebase, constructor injection would be preferred.
+
+The `rosterLoader` field is package-private (no `private` modifier) specifically to allow unit tests in the same package to inject a stub directly without running a CDI container.
